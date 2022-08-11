@@ -36,8 +36,8 @@ def stream_is_selected(mdata):
 
 
 def do_sync(config, catalog, state):
-    timers = {'pre': 0, 'bookmark': 0, 'input_files': 0, 'get_iter': 0,
-              'resolve_fields': 0, 'tfm': 0, 'write_record': 0, 'write_state': 0}
+    timers = {'pre': 0, 'bookmark': 0, 'input_files': 0, 'get_iter': 0, 'resolve_fields': 0, 'tfm': 0,
+              'write_record': 0, 'write_state': 0, 'filter_data': 0, 'get_tfmv_by_type': 0, 'tfm_datetime': 0, 'tfm_decimal': 0, 'tfm_list_op': 0, 'tfm_type_to_list': 0, 'tfm_prehook': 0}
 
     LOGGER.info('Starting sync.')
 

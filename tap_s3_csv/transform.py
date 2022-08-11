@@ -3,6 +3,7 @@ import datetime
 import decimal
 import logging
 import re
+import time
 
 import singer.metadata
 from singer.logger import get_logger
@@ -148,18 +149,21 @@ class Transformer:
 
         return data
 
-    def transform(self, data, schema, auto_fields, filter_fields):
+    def transform(self, data, schema, auto_fields, filter_fields, timers):
+        start = time.time()
         data = self.filter_data_by_metadata(data, auto_fields, filter_fields)
+        timers['filter_data'] += time.time() - start
 
-        success, transformed_data = self.transform_recur(data, schema, [])
+        success, transformed_data = self.transform_recur(
+            data, schema, [], None, timers)
         if not success:
             raise SchemaMismatch(self.errors)
 
         return transformed_data
 
-    def transform_recur(self, data, schema, path, source_type=None):
+    def transform_recur(self, data, schema, path, source_type=None, timers={}):
         if "anyOf" in schema:
-            return self._transform_anyof(data, schema, path)
+            return self._transform_anyof(data, schema, path, timers)
 
         if "type" not in schema:
             # indicates no typing information so don't bother transforming it
@@ -167,15 +171,21 @@ class Transformer:
 
         types = schema["type"]
         if not isinstance(types, list):
+            start = time.time()
             types = [types]
+            if 'tfm_type_to_list' in timers:
+                timers['tfm_type_to_list'] += time.time() - start
 
         if "null" in types:
+            start = time.time()
             types.remove("null")
             types.append("null")
+            if 'tfm_list_op' in timers:
+                timers['tfm_list_op'] += time.time() - start
 
         for typ in types:
             success, transformed_data = self._transform(
-                data, typ, schema, path, source_type)
+                data, typ, schema, path, source_type, timers)
             if success:
                 return success, transformed_data
         else:  # pylint: disable=useless-else-on-loop
@@ -184,11 +194,11 @@ class Transformer:
                 Error(path, data, schema, logging_level=LOGGER.level))
             return False, None
 
-    def _transform_anyof(self, data, schema, path):
+    def _transform_anyof(self, data, schema, path, timers):
         subschemas = schema['anyOf']
         for subschema in subschemas:
             success, transformed_data = self.transform_recur(
-                data, subschema, path)
+                data, subschema, path, None, timers)
             if success:
                 return success, transformed_data
         else:  # pylint: disable=useless-else-on-loop
@@ -197,7 +207,7 @@ class Transformer:
                 Error(path, data, schema, logging_level=LOGGER.level))
             return False, None
 
-    def _transform_object(self, data, schema, path, pattern_properties):
+    def _transform_object(self, data, schema, path, pattern_properties, timers):
         # We do not necessarily have a dict to transform here. The schema's
         # type could contain multiple possible values. Eg:
         #     ["null", "object", "string"]
@@ -218,7 +228,7 @@ class Transformer:
             if key in schema or pattern_schemas:
                 sub_schema = schema.get(key, {'anyOf': pattern_schemas})
                 success, subdata = self.transform_recur(
-                    value, sub_schema, path + [key],  self.source_type_for_updatecol_map.get(key))
+                    value, sub_schema, path + [key],  self.source_type_for_updatecol_map.get(key), timers)
                 successes.append(success)
                 result[key] = subdata
             else:
@@ -231,7 +241,7 @@ class Transformer:
 
         return all(successes), result
 
-    def _transform_array(self, data, schema, path):
+    def _transform_array(self, data, schema, path, timers):
         # We do not necessarily have a list to transform here. The schema's
         # type could contain multiple possible values. Eg:
         #     ["null", "array", "integer"]
@@ -240,7 +250,8 @@ class Transformer:
         result = []
         successes = []
         for i, row in enumerate(data):
-            success, subdata = self.transform_recur(row, schema, path + [i])
+            success, subdata = self.transform_recur(
+                row, schema, path + [i], None, timers)
             successes.append(success)
             result.append(subdata)
 
@@ -303,13 +314,21 @@ class Transformer:
         else:
             return False, None
 
-    def _transform(self, data, typ, schema, path, source_type=None):
+    def _transform(self, data, typ, schema, path, source_type=None, timers={}):
 
         if source_type:
-            return self._get_transformvalue_by_type(data, source_type)
+            start = time.time()
+            success, transformed_data = self._get_transformvalue_by_type(
+                data, source_type)
+            if 'get_tfmv_by_type' in timers:
+                timers['get_tfmv_by_type'] += time.time() - start
+            return success, transformed_data
 
         if self.pre_hook:
+            start = time.time()
             data = self.pre_hook(data, typ, schema)
+            if 'tfm_prehook' in timers:
+                timers['tfm_prehook'] += time.time() - start
 
         if typ == "null":
             if data is None or data == "":
@@ -318,12 +337,16 @@ class Transformer:
                 return False, None
 
         elif schema.get("format") == "date-time":
+            start = time.time()
             data = self._transform_datetime(data)
+            if 'tfm_datetime' in timers:
+                timers['tfm_datetime'] += time.time() - start
             if data is None:
                 return False, None
 
             return True, data
         elif schema.get("format") == "singer.decimal":
+            start = time.time()
             if data is None:
                 return False, None
 
@@ -332,6 +355,9 @@ class Transformer:
                     return True, str(decimal.Decimal(str(data)))
                 except:
                     return False, None
+                finally:
+                    if 'tfm_decimal' in timers:
+                        timers['tfm_decimal'] += time.time() - start
             elif isinstance(data, decimal.Decimal):
                 try:
                     if data.is_snan():
@@ -340,20 +366,32 @@ class Transformer:
                         return True, str(data)
                 except:
                     return False, None
+                finally:
+                    if 'tfm_decimal' in timers:
+                        timers['tfm_decimal'] += time.time() - start
 
+            if 'tfm_decimal' in timers:
+                timers['tfm_decimal'] += time.time() - start
             return False, None
         elif typ == "object":
             # Objects do not necessarily specify properties
             return self._transform_object(data,
                                           schema.get("properties", {}),
                                           path,
-                                          schema.get(SchemaKey.pattern_properties))
+                                          schema.get(
+                                              SchemaKey.pattern_properties),
+                                          timers)
 
         elif typ == "array":
-            return self._transform_array(data, schema["items"], path)
+            return self._transform_array(data, schema["items"], path, timers)
 
         else:
-            return self._get_transformvalue_by_type(data, typ)
+            start = time.time()
+            success, transformed_data = self._get_transformvalue_by_type(
+                data, typ)
+            if 'get_tfmv_by_type' in timers:
+                timers['get_tfmv_by_type'] += time.time() - start
+            return success, transformed_data
 
 
 def resolve_filter_fields(metadata=None):

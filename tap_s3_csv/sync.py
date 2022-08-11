@@ -256,7 +256,7 @@ def sync_csv_file(config, file_handle, s3_path, table_spec, stream, timers={}):
             start = time.time()
             with transform.Transformer(source_type_for_updatecol_map) as transformer:
                 to_write = transformer.transform(
-                    row, stream['schema'], auto_fields, filter_fields)
+                    row, stream['schema'], auto_fields, filter_fields, timers)
             timers['tfm'] += time.time() - start
 
             start = time.time()
@@ -270,7 +270,7 @@ def sync_csv_file(config, file_handle, s3_path, table_spec, stream, timers={}):
     return records_synced
 
 
-def sync_jsonl_file(config, iterator, s3_path, table_spec, stream):
+def sync_jsonl_file(config, iterator, s3_path, table_spec, stream, timers={}):
     LOGGER.info('Syncing file "%s".', s3_path)
 
     table_name = table_spec['table_name']
@@ -293,7 +293,7 @@ def sync_jsonl_file(config, iterator, s3_path, table_spec, stream):
 
         with transform.Transformer() as transformer:
             to_write = transformer.transform(
-                row, stream['schema'], auto_fields, filter_fields)
+                row, stream['schema'], auto_fields, filter_fields, timers)
 
         singer.write_record(table_name, to_write)
         records_synced += 1
