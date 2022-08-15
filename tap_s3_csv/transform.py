@@ -169,10 +169,6 @@ class Transformer:
         if not isinstance(types, list):
             types = [types]
 
-        if "null" in types:
-            types.remove("null")
-            types.append("null")
-
         for typ in types:
             success, transformed_data = self._transform(
                 data, typ, schema, path, source_type)
@@ -183,6 +179,38 @@ class Transformer:
             self.errors.append(
                 Error(path, data, schema, logging_level=LOGGER.level))
             return False, None
+
+    def transform_schema_recur(self, schema):
+        if "type" not in schema:
+            return schema
+        types = schema["type"]
+        if not isinstance(types, list):
+            types = [types]
+            schema["type"] = types
+
+        if "null" in types and types[-1] != "null":
+            types.remove("null")
+            types.append("null")
+
+        for typ in types:
+            if typ == "object" and "properties" in schema:
+                schema["properties"] = self._transform_schema_nested(
+                    schema.get("properties", {}))
+
+            elif typ == "array":
+                schema["items"] = self.transform_schema_recur(
+                    schema["items"])
+
+        return schema
+
+    def _transform_schema_nested(self, schema):
+        if schema == {}:
+            return schema
+        result = {}
+        for sub_schema in schema:
+            result[sub_schema] = self.transform_schema_recur(
+                schema[sub_schema])
+        return result
 
     def _transform_anyof(self, data, schema, path):
         subschemas = schema['anyOf']
