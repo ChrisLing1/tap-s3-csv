@@ -87,9 +87,9 @@ def detect_dialect(config, s3_file, table):
                 if len(interesting) < MAX_CHARDET_LINES and (len(interesting) < FIRST_CHARDET_LINES or DETECT_CHARDET_LINE.search(line)):
                     interesting.append(i)
 
-                    #  keep line that is not appended to lines array
-                    if bytes_read + line_bytes > MAX_LINES_BYTES:
-                        interesting_map[i] = line
+                #  keep line that is not appended to lines array
+                if bytes_read + line_bytes > MAX_LINES_BYTES:
+                    interesting_map[i] = line
 
         except StopIteration:
             break
@@ -99,6 +99,11 @@ def detect_dialect(config, s3_file, table):
         random.seed(0)
         remainder = min(MAX_CHARDET_LINES - len(interesting), lines_read - 1)
 
+        print(lines_read)
+        print(remainder)
+        print(len(interesting))
+        print(interesting)
+
         for _ in range(remainder):
             i = random.randint(1, lines_read - 1)
             interesting.append(i)
@@ -107,6 +112,11 @@ def detect_dialect(config, s3_file, table):
         # feed selected lines to universal detector
         detector = chardet.UniversalDetector()
         detector.MINIMUM_THRESHOLD = 0.70
+
+        print(len(lines))
+        print(bytes_read)
+        print(interesting)
+        print(interesting_map)
 
         for i in interesting:
             # get line from cache
